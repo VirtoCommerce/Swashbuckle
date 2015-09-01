@@ -10,6 +10,7 @@ using Swashbuckle.Swagger;
 using Swashbuckle.Swagger.FromUriParams;
 using Swashbuckle.Swagger.Annotations;
 using Swashbuckle.Swagger.XmlComments;
+using Newtonsoft.Json;
 
 namespace Swashbuckle.Application
 {
@@ -33,6 +34,7 @@ namespace Swashbuckle.Application
         private readonly IList<Func<IDocumentFilter>> _documentFilters;
         private Func<IEnumerable<ApiDescription>, ApiDescription> _conflictingActionsResolver;
         private Func<HttpRequestMessage, string> _rootUrlResolver;
+        private Func<IApiExplorer, JsonSerializerSettings, IDictionary<string, Info>, SwaggerGeneratorOptions, ISwaggerProvider> _swaggerProviderResolver;
 
         public SwaggerDocsConfig()
         {
@@ -49,12 +51,18 @@ namespace Swashbuckle.Application
             _documentFilters = new List<Func<IDocumentFilter>>();
             _rootUrlResolver = DefaultRootUrlResolver;
 
+            _swaggerProviderResolver = (apiExplorer, jsonSettings, apiVersions, options) => new SwaggerGenerator(apiExplorer, jsonSettings, apiVersions, options);
             SchemaFilter<ApplySwaggerSchemaFilterAttributes>();
 
             OperationFilter<HandleFromUriParams>();
             OperationFilter<ApplySwaggerOperationAttributes>();
             OperationFilter<ApplySwaggerResponseAttributes>();
             OperationFilter<ApplySwaggerOperationFilterAttributes>();
+        }
+
+        public void SwaggerProviderResolver(Func<IApiExplorer, JsonSerializerSettings, IDictionary<string, Info>, SwaggerGeneratorOptions, ISwaggerProvider> swaggerProviderResolver)
+        {
+            _swaggerProviderResolver = swaggerProviderResolver;
         }
 
         public InfoBuilder SingleApiVersion(string version, string title)
@@ -131,7 +139,7 @@ namespace Swashbuckle.Application
         }
 
         // NOTE: In next major version, ModelFilter will completely replace SchemaFilter
-        internal  void ModelFilter<TFilter>()
+        internal void ModelFilter<TFilter>()
             where TFilter : IModelFilter, new()
         {
             ModelFilter(() => new TFilter());
@@ -224,11 +232,12 @@ namespace Swashbuckle.Application
                 conflictingActionsResolver: _conflictingActionsResolver
             );
 
-            return new SwaggerGenerator(
-                httpConfig.Services.GetApiExplorer(),
-                httpConfig.SerializerSettingsOrDefault(),
-                _versionInfoBuilder.Build(),
-                options);
+
+            return _swaggerProviderResolver(httpConfig.Services.GetApiExplorer(),
+            httpConfig.SerializerSettingsOrDefault(),
+            _versionInfoBuilder.Build(),
+            options);
+
         }
 
         internal string GetRootUrl(HttpRequestMessage swaggerRequest)
@@ -249,7 +258,7 @@ namespace Swashbuckle.Application
 
             var httpConfiguration = request.GetConfiguration();
             var virtualPathRoot = httpConfiguration.VirtualPathRoot.TrimEnd('/');
-            
+
             return string.Format("{0}://{1}:{2}{3}", scheme, host, port, virtualPathRoot);
         }
 
